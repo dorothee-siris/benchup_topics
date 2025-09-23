@@ -325,9 +325,22 @@ if chosen is not None:
         if sum(vals2) == 0:
             ax.text(0.5, 0.5, "No data", ha="center", va="center")
         else:
-            # no labels on the wedges; legend instead
-            wedges, _ = ax.pie(vals2, startangle=90)
-            ax.legend(wedges, labels2, loc="center left", bbox_to_anchor=(1.05, 0.5), frameon=False)
+            # Keep percentages on wedges, but remove name labels
+            wedges, texts, autotexts = ax.pie(
+                vals2,
+                autopct="%1.0f%%",
+                startangle=90,
+                labels=None
+            )
+            # Legend BELOW the pie (single row)
+            fig.subplots_adjust(bottom=0.22)  # give space at the bottom
+            ax.legend(
+                wedges, labels2,
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.08),
+                frameon=False,
+                ncol=3
+            )
 
         ax.axis("equal")
         st.pyplot(fig, use_container_width=False)
@@ -368,20 +381,40 @@ if chosen is not None:
             sizes = np.clip((df_f["count"].fillna(0).astype(float) / (df_f["count"].max() or 1)) * 3000, 50, 3000)
             colors = [domain_color(n) for n in df_f["name"]]
 
-            left_pad = -0.55
             fig, ax = plt.subplots(figsize=(6.8, 0.48*len(df_f)+1))
             ax.scatter(df_f["si"], y, s=sizes, c=colors, alpha=0.85, edgecolors="none", zorder=3)
             ax.axvline(1.0, color="#444", linestyle="--", linewidth=1, zorder=1)
 
-            for yi, (cnt, name) in enumerate(zip(df_f["count"].fillna(0).astype(int), df_f["name"])):
-                ax.text(left_pad+0.03, yi, f"{cnt:,}".replace(",", " "), va="center", ha="left", fontsize=8, color="#444")
+            # --- Reserve a fixed pixel gutter on the LEFT for the counts ---
+            # 1) decide how many pixels you want to reserve:
+            left_pad_px = 80     # adjust if you want a wider/narrower gutter
+            offset_px   = 6      # a small inset so numbers aren't hugging the edge
+
+            # 2) pick the right limit from data (same as before)
+            xmax = max(1.1, float(df_f["si"].max() or 0) * 1.15)
+
+            # 3) temporarily set limits to compute data-per-pixel, then convert
+            ax.set_xlim(0, xmax)
+            fig.canvas.draw()  # must draw to get correct pixel extents
+            renderer = fig.canvas.get_renderer()
+            bb = ax.get_window_extent(renderer=renderer)
+            ax_width_px = bb.width                   # axis width in pixels
+            data_per_px = (xmax - 0.0) / ax_width_px # data units per pixel (x direction)
+            left_pad_data = left_pad_px * data_per_px
+            offset_data   = offset_px   * data_per_px
+
+            # 4) extend xlim to include the left gutter
+            ax.set_xlim(-left_pad_data, xmax)
+
+            # counts text in the left gutter (+1 font size: 9 instead of 8)
+            for yi, cnt in enumerate(df_f["count"].fillna(0).astype(int)):
+                ax.text(-left_pad_data + offset_data, yi, f"{cnt:,}".replace(",", " "),
+                        va="center", ha="left", fontsize=9, color="#444")
 
             ax.set_xlabel("SI (Specialization Index)")
             ax.set_yticks(y)
             ax.set_yticklabels(df_f["name"])
             ax.invert_yaxis()
-            xmax = max(1.1, (df_f["si"].max() or 0) * 1.15)
-            ax.set_xlim(left=left_pad, right=xmax)
             ax.grid(axis="x", color="#eee"); ax.set_axisbelow(True)
 
             st.pyplot(fig, use_container_width=True)
