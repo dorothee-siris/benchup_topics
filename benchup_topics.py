@@ -321,23 +321,27 @@ if chosen is not None:
         for v, l in zip(vals, labels):
             if v and v > 0:
                 vals2.append(v); labels2.append(l)
+                
+        def _autopct_fmt(pct): return "%1.1f%%" % pct
 
         if sum(vals2) == 0:
             ax.text(0.5, 0.5, "No data", ha="center", va="center")
         else:
-            # Keep percentages on wedges, but remove name labels
-            wedges, texts, autotexts = ax.pie(
+            # place percentages OUTSIDE the pie; no name labels on wedges
+            wedges, _texts, autotexts = ax.pie(
                 vals2,
-                autopct="%1.0f%%",
                 startangle=90,
-                labels=None
+                labels=None,
+                autopct=_autopct_fmt,
+                pctdistance=1.12,          # >1 => outside the circle
+                textprops={"clip_on": False}
             )
             # Legend BELOW the pie (single row)
-            fig.subplots_adjust(bottom=0.22)  # give space at the bottom
+            fig.subplots_adjust(bottom=0.26)  # give extra space for legend
             ax.legend(
                 wedges, labels2,
                 loc="upper center",
-                bbox_to_anchor=(0.5, -0.08),
+                bbox_to_anchor=(0.5, -0.10),
                 frameon=False,
                 ncol=3
             )
