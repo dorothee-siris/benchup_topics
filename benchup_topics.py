@@ -1,12 +1,14 @@
 # benchup_topics.py
-# BenchUp topics (v2.2)
-# - Legend only once (OpenAlex domains)
-# - Updated domain colors
-# - Clickable institution names (OpenAlex)
-# - Rounded avg/min/max pubs
-# - Fields sort mode (SI / Count / Fixed Domain order with Medicine first)
-# - Topics static-threshold coloring
-# - Two similarities: Field SI (cosine on SI) and Field SI % (cosine on shares)
+# BenchUp topics (v2.3)
+# - Correct OpenAlex field→domain mapping (4 domains)
+# - Domain colors updated; single legend row above both plots
+# - Search also matches city; no NameError on no-match
+# - Clean match label "Name (City, Country)" (no extra parentheses)
+# - Avg/min/max pubs rounded; topics "count" as int
+# - Fields sort: SI / Count / Fixed domain order (alphabetical in-domain)
+# - Benchmark results: primary ranking by shared topics (desc)
+# - Keep sortable table and add a separate clickable OpenAlex link column
+# - New filters: exclude selected country; restrict to Europe
 
 import streamlit as st
 import pandas as pd
@@ -26,9 +28,9 @@ st.markdown(
     h1, h2, h3, h4, h5, h6 { color: #111 !important; }
     .red-big { color:#d62728; font-size: 2.0rem; font-weight:700; }
     .note { font-size:0.92rem; color:#333; }
-    table.bench { width: 100%; border-collapse: collapse; }
-    table.bench th, table.bench td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; vertical-align: top; }
-    table.bench th { background:#fafafa; }
+    .legend-row { display:flex; gap:16px; flex-wrap:wrap; margin: 4px 0 8px 0; }
+    .legend-item { display:flex; align-items:center; gap:8px; }
+    .legend-swatch { width:14px; height:14px; border-radius:2px; display:inline-block; }
     </style>
     """,
     unsafe_allow_html=True
@@ -38,55 +40,52 @@ st.markdown(
 ROOT = Path(__file__).resolve().parent
 DATA_PATH = ROOT / "data" / "institutions_master.parquet"
 
-# -------- Domain coloring ----------
-# Updated per your palette (kept colors for A&H and Eng/Tech)
+# -------- Exact OpenAlex field → domain mapping ----------
+FIELDS_TO_DOMAIN = {
+    # 1) PHYSICAL SCIENCES
+    "Chemical Engineering": "Physical Sciences",
+    "Chemistry": "Physical Sciences",
+    "Computer Science": "Physical Sciences",
+    "Earth and Planetary Sciences": "Physical Sciences",
+    "Energy": "Physical Sciences",
+    "Engineering": "Physical Sciences",
+    "Materials Science": "Physical Sciences",
+    "Mathematics": "Physical Sciences",
+    "Physics and Astronomy": "Physical Sciences",
+    # 2) LIFE SCIENCES
+    "Agricultural and Biological Sciences": "Life Sciences",
+    "Biochemistry, Genetics and Molecular Biology": "Life Sciences",
+    "Environmental Science": "Life Sciences",
+    "Immunology and Microbiology": "Life Sciences",
+    # 3) HEALTH SCIENCES
+    "Dentistry": "Health Sciences",
+    "Health Professions": "Health Sciences",
+    "Medicine": "Health Sciences",
+    "Neuroscience": "Health Sciences",
+    "Nursing": "Health Sciences",
+    "Pharmacology, Toxicology and Pharmaceutics": "Health Sciences",
+    "Veterinary": "Health Sciences",
+    # 4) SOCIAL SCIENCES
+    "Arts and Humanities": "Social Sciences",
+    "Business, Management and Accounting": "Social Sciences",
+    "Decision Sciences": "Social Sciences",
+    "Economics, Econometrics and Finance": "Social Sciences",
+    "Psychology": "Social Sciences",
+    "Social Sciences": "Social Sciences",
+}
+DOMAIN_NAMES = ["Health Sciences", "Life Sciences", "Physical Sciences", "Social Sciences", "Other"]
+
+# -------- Domain colors (as requested) ----------
 DOMAIN_COLORS = {
-    "Health Sciences": "#F855C3",   # user provided ("#F855C32" looked like a typo)
-    "Physical Sciences": "#8190FF",
+    "Health Sciences": "#F85C32",
     "Life Sciences": "#0CA750",
+    "Physical Sciences": "#8190FF",
     "Social Sciences": "#FFCB3A",
-    "Arts & Humanities": "#9467bd",
-    "Engineering & Tech": "#ff7f0e",
     "Other": "#7f7f7f",
 }
-FIELD_TO_DOMAIN_HINTS = {
-    "Medicine": "Health Sciences",
-    "Nursing": "Health Sciences",
-    "Health Professions": "Health Sciences",
-    "Biochemistry": "Life Sciences",
-    "Agricultural": "Life Sciences",
-    "Immunology": "Life Sciences",
-    "Neuroscience": "Life Sciences",
-    "Biology": "Life Sciences",
-    "Chemistry": "Physical Sciences",
-    "Physics": "Physical Sciences",
-    "Earth and Planetary": "Physical Sciences",
-    "Mathematics": "Physical Sciences",
-    "Computer Science": "Engineering & Tech",
-    "Engineering": "Engineering & Tech",
-    "Materials Science": "Engineering & Tech",
-    "Environmental Science": "Physical Sciences",
-    "Energy": "Engineering & Tech",
-    "Psychology": "Social Sciences",
-    "Decision Sciences": "Social Sciences",
-    "Economics": "Social Sciences",
-    "Business": "Social Sciences",
-    "Social Sciences": "Social Sciences",
-    "Arts and Humanities": "Arts & Humanities",
-}
 
-DOMAIN_FIXED_ORDER = [
-    "Health Sciences",
-    "Life Sciences",
-    "Physical Sciences",
-    "Engineering & Tech",
-    "Social Sciences",
-    "Arts & Humanities",
-    "Other",
-]
-
-# Preferred field order inside domains (only setting Medicine explicitly as first)
-PREFERRED_FIRST = {"Health Sciences": ["Medicine"]}
+# Fixed domain order for the "Fixed domain order" sort
+DOMAIN_FIXED_ORDER = ["Health Sciences", "Life Sciences", "Physical Sciences", "Social Sciences", "Other"]
 
 # -------- Helpers ----------
 def norm(s: str) -> str:
@@ -138,10 +137,8 @@ def to_float_safe(x):
     except: return np.nan
 
 def estimate_domain(field_name: str) -> str:
-    for key, dom in FIELD_TO_DOMAIN_HINTS.items():
-        if key.lower() in field_name.lower():
-            return dom
-    return "Other"
+    # exact mapping first; fallback "Other"
+    return FIELDS_TO_DOMAIN.get(str(field_name).strip(), "Other")
 
 def domain_color(field_name: str) -> str:
     return DOMAIN_COLORS.get(estimate_domain(field_name), DOMAIN_COLORS["Other"])
@@ -151,6 +148,7 @@ def build_search_index(df):
         parts = [r.get("display_name", "")]
         if r.get("acronyms"): parts.append(r.get("acronyms"))
         if r.get("alternatives"): parts.append(r.get("alternatives"))
+        if r.get("city"): parts.append(r.get("city"))
         return norm(" | ".join([str(p) for p in parts if str(p).strip()]))
     df = df.copy()
     df["__searchkey"] = df.apply(row_key, axis=1)
@@ -170,7 +168,6 @@ def cosine_sim(vec_a, vec_b):
     return float(np.dot(a, b) / denom)
 
 def build_vector(df_fields, all_keys, kind="si"):
-    # kind: "si" or "share"
     if kind == "share":
         d = {r["name"]: (r["share"] if not pd.isna(r["share"]) else 0.0) for _, r in df_fields.iterrows()}
     else:
@@ -184,18 +181,11 @@ def sort_fields_df(df_f: pd.DataFrame, mode: str) -> pd.DataFrame:
         return df.sort_values("si", ascending=False)
     if mode == "Count (desc)":
         return df.sort_values("count", ascending=False)
-    # Domain order (fixed), with Medicine first inside Health Sciences, others A–Z
+    # Fixed domain order, alphabetical within each domain
     df["domain"] = df["name"].apply(estimate_domain)
-    def field_rank(row):
-        dom = row["domain"]
-        pref = PREFERRED_FIRST.get(dom, [])
-        if row["name"] in pref:
-            return (DOMAIN_FIXED_ORDER.index(dom), 0, row["name"])
-        # non-preferred: block 1, alpha
-        return (DOMAIN_FIXED_ORDER.index(dom), 1, row["name"])
-    df["_rank"] = df.apply(field_rank, axis=1)
-    df = df.sort_values(["_rank"])
-    return df.drop(columns=["_rank"])
+    df["__dom_rank"] = df["domain"].apply(lambda d: DOMAIN_FIXED_ORDER.index(d) if d in DOMAIN_FIXED_ORDER else len(DOMAIN_FIXED_ORDER))
+    df = df.sort_values(["__dom_rank","name"], ascending=[True, True]).drop(columns=["__dom_rank"])
+    return df
 
 # static-threshold coloring for topics ratio (%)
 def color_topics_count(val):
@@ -249,7 +239,11 @@ st.markdown(
 )
 
 # -------- Search ----------
-q = st.text_input("Find your institution (name, acronym, alternatives)", placeholder="e.g., CNRS, MIT, \"Université Paris\" ...")
+q = st.text_input("Find your institution (name, acronym, alternatives, city)", placeholder="e.g., CNRS Paris, University of Milan, MIT ...")
+
+# make sure chosen exists even if no results
+chosen = None
+
 if q:
     nq = norm(q)
     m_starts = df[df["__searchkey"].str.startswith(nq)].copy()
@@ -260,7 +254,7 @@ else:
     results = df.head(0)
 
 if len(results) == 0 and q:
-    st.info("No match. Try fewer words or the official acronym.")
+    st.info("No match. Try fewer words or official acronym or the city name.")
 else:
     st.write(f"Matches: {len(results)}")
 
@@ -269,14 +263,13 @@ else:
         city = (r.city or "").strip()
         country = (r.country or "").strip()
         if city and country:
-            return f"{name} ({city, country})".replace("('","(").replace("', '", ", ").replace("')",")")
+            return f"{name} ({city}, {country})"
         if country:
             return f"{name} ({country})"
         return name
 
     options = ["—"] + [label_for_row(r) for _, r in results.iterrows()]
     sel = st.selectbox("Select institution", options=options, index=0)
-    chosen = None
     if sel != "—":
         idx = int(results.index[[label_for_row(r) for _, r in results.iterrows()].index(sel)])
         chosen = results.loc[idx]
@@ -335,30 +328,31 @@ if chosen is not None:
         horizontal=True
     )
 
+    # One legend row for both plots
+    legend_items = "".join(
+        f'<div class="legend-item"><span class="legend-swatch" style="background:{DOMAIN_COLORS[d]};"></span>{d}</div>'
+        for d in ["Health Sciences","Life Sciences","Physical Sciences","Social Sciences"]
+    )
+    st.markdown(f'<div class="legend-row">{legend_items}</div>', unsafe_allow_html=True)
+
     df_fields_all = parse_fields_blob(chosen.fields)
     df_fields_prim = parse_fields_blob(chosen.primary_fields)
 
-    # Fields scatter with counts on left margin + legend on first plot
-    def plot_fields(df_f, title, host, show_legend=False):
+    def plot_fields(df_f, title, host):
         with host:
             st.markdown(f"**{title}**")
             if df_f.empty:
                 st.info("No field data"); return
-            df_f = sort_fields_df(df_f, "SI (desc)" if sort_mode=="SI (desc)" else ("Count (desc)" if sort_mode=="Count (desc)" else "Fixed"))
-            if sort_mode == "Fixed domain order":
-                # Our helper returns sorted df already
-                pass
+            df_f = sort_fields_df(df_f, sort_mode)
             y = np.arange(len(df_f))
             sizes = np.clip((df_f["count"].fillna(0).astype(float) / (df_f["count"].max() or 1)) * 3000, 50, 3000)
             colors = [domain_color(n) for n in df_f["name"]]
-            domains_here = [estimate_domain(n) for n in df_f["name"]]
 
             left_pad = -0.55
             fig, ax = plt.subplots(figsize=(6.8, 0.48*len(df_f)+1))
             ax.scatter(df_f["si"], y, s=sizes, c=colors, alpha=0.85, edgecolors="none", zorder=3)
             ax.axvline(1.0, color="#444", linestyle="--", linewidth=1, zorder=1)
 
-            # counts text at left
             for yi, (cnt, name) in enumerate(zip(df_f["count"].fillna(0).astype(int), df_f["name"])):
                 ax.text(left_pad+0.03, yi, f"{cnt:,}".replace(",", " "), va="center", ha="left", fontsize=8, color="#444")
 
@@ -369,16 +363,6 @@ if chosen is not None:
             xmax = max(1.1, (df_f["si"].max() or 0) * 1.15)
             ax.set_xlim(left=left_pad, right=xmax)
             ax.grid(axis="x", color="#eee"); ax.set_axisbelow(True)
-
-            # legend just under the title (only for first plot)
-            if show_legend:
-                uniq = []
-                for d in domains_here:
-                    if d not in uniq: uniq.append(d)
-                handles = [Patch(color=DOMAIN_COLORS.get(d, DOMAIN_COLORS["Other"]), label=d) for d in uniq]
-                # place legend above axes (slightly outside)
-                ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.0, -0.06),
-                          ncol=min(4, len(handles)), frameon=False)
 
             st.pyplot(fig, use_container_width=True)
 
@@ -391,10 +375,10 @@ if chosen is not None:
             )
 
     sc1, sc2 = st.columns(2)
-    plot_fields(df_fields_all, "Fields (all)", sc1, show_legend=True)
-    plot_fields(df_fields_prim, "Fields (primary)", sc2, show_legend=False)
+    plot_fields(df_fields_all, "Fields (all)", sc1)
+    plot_fields(df_fields_prim, "Fields (primary)", sc2)
 
-    # Topics tables with static-threshold coloring
+    # Topics tables (count as int; static-threshold coloring)
     def show_topics_table(blob, title, host):
         with host:
             st.markdown(f"**{title}**")
@@ -402,6 +386,7 @@ if chosen is not None:
             if df_topics.empty:
                 st.info("No topic data"); return
             df_topics["ratio_%"] = (df_topics["share"].fillna(0.0) * 100.0)
+            df_topics["count"] = df_topics["count"].fillna(0).astype(int)
             df_topics = df_topics.sort_values(["count","ratio_%"], ascending=False).reset_index(drop=True)
             df_topics.index = df_topics.index + 1
             styled = (
@@ -449,6 +434,19 @@ if chosen is not None:
     allowed_types = sorted([t for t in df["type"].dropna().unique()])
     type_filter = st.multiselect("Institution type (optional)", allowed_types, default=[])
 
+    # Extra geo filters
+    exclude_same_country = st.checkbox("Exclude institutions from the same country", value=False)
+
+    EUROPE = {
+        "Albania","Andorra","Armenia","Austria","Azerbaijan","Belarus","Belgium","Bosnia and Herzegovina",
+        "Bulgaria","Croatia","Cyprus","Czechia","Denmark","Estonia","Finland","France","Georgia","Germany",
+        "Greece","Hungary","Iceland","Ireland","Italy","Kosovo","Latvia","Liechtenstein","Lithuania",
+        "Luxembourg","Malta","Moldova","Monaco","Montenegro","Netherlands","North Macedonia","Norway",
+        "Poland","Portugal","Romania","Russia","Serbia","Slovakia","Slovenia","Spain","Sweden","Switzerland",
+        "Turkey","Ukraine","United Kingdom","Faroe Islands"
+    }
+    restrict_europe = st.checkbox("Restrict results to Europe", value=False)
+
     # Prepare target topic set & vectors
     target_topics_df = parse_topics_blob(chosen.primary_topics_top100 if use_primary else chosen.topics_top100)
     target_topics_set = set(target_topics_df["name"].tolist())
@@ -472,6 +470,8 @@ if chosen is not None:
         apy = r["avg_pubs_per_year"]
         if apy < min_pubs or apy > max_pubs: return False
         if type_filter and r.get("type") not in set(type_filter): return False
+        if exclude_same_country and (r.get("country") == chosen.country): return False
+        if restrict_europe and (r.get("country") not in EUROPE): return False
         return True
 
     rows = []
@@ -519,14 +519,12 @@ if chosen is not None:
         books_r = to_int_safe(r.books_2020_24) or 0
         docs_detail = f"Articles {arts_r:,} | Chapters {chaps_r:,} | Books {books_r:,}"
 
-        url = f"https://openalex.org/institutions/{str(r.openalex_id).lower()}"
         rows.append({
-            "openalex_id": r.openalex_id,
-            "Institution": f'<a href="{url}" target="_blank">{r.display_name}</a>',
-            "name": r.display_name,  # for CSV
+            "name": r.display_name,
+            "OpenAlex": f"https://openalex.org/institutions/{str(r.openalex_id).lower()}",
             "type": r.type,
-            "country": r.country,
             "city": r.city,
+            "country": r.country,
             "avg_pubs_per_year": int(round(r.avg_pubs_per_year)),
             "shared_topics_count": len(shared_names),
             "similarity_SI": round(sim_si, 3),
@@ -534,44 +532,41 @@ if chosen is not None:
             "shared_topics_detail": shared_detail,
             "fields_detail": fields_detail,
             "document_types": docs_detail,
+            "openalex_id": r.openalex_id,
         })
 
     res = pd.DataFrame(rows)
     if res.empty:
         st.info("No matches with the current filters.")
     else:
+        # Rank primarily by shared topics (desc), then by similarity metrics
         res = res.sort_values(
-            ["similarity_SI","similarity_%","shared_topics_count","avg_pubs_per_year"],
+            ["shared_topics_count","similarity_SI","similarity_%","avg_pubs_per_year"],
             ascending=[False, False, False, True]
         ).reset_index(drop=True)
 
         show_details = st.checkbox("Show detailed columns (shared topics, fields, doc types)", value=False)
 
-        base_cols = ["Institution","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_SI","similarity_%"]
+        base_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_SI","similarity_%","OpenAlex"]
         detail_cols = ["shared_topics_detail","fields_detail","document_types"]
-        display_cols = base_cols + (detail_cols if show_details else [])
-
-        # Render as HTML table so the Institution name is clickable
-        # (st.dataframe does not render per-cell markdown links cleanly)
-        def html_table(df_view: pd.DataFrame) -> str:
-            headers = "".join(f"<th>{h}</th>" for h in df_view.columns)
-            rows_html = []
-            for _, row in df_view.iterrows():
-                tds = []
-                for col in df_view.columns:
-                    v = row[col]
-                    if col == "Institution":
-                        tds.append(f"<td>{v}</td>")
-                    else:
-                        tds.append(f"<td>{v}</td>")
-                rows_html.append("<tr>" + "".join(tds) + "</tr>")
-            return f'<table class="bench"><thead><tr>{headers}</tr></thead><tbody>' + "".join(rows_html) + "</tbody></table>"
+        display_cols = (base_cols + detail_cols) if show_details else base_cols
 
         st.write(f"**{len(res)}** matching institutions")
-        st.markdown(html_table(res[display_cols]), unsafe_allow_html=True)
 
-        # CSV: include all (with plain name, not HTML)
-        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_SI","similarity_%"] + detail_cols + ["openalex_id"]
+        # Keep sortable interactive table; provide link in a dedicated column
+        st.dataframe(
+            res[display_cols],
+            use_container_width=True,
+            column_config={
+                "OpenAlex": st.column_config.LinkColumn("OpenAlex", help="Open institution on OpenAlex"),
+                "avg_pubs_per_year": st.column_config.NumberColumn("Avg pubs/yr", format="%d"),
+                "shared_topics_count": st.column_config.NumberColumn("Shared topics", format="%d"),
+            },
+            hide_index=True,
+        )
+
+        # CSV includes everything, including openalex_id
+        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_SI","similarity_%"] + detail_cols + ["openalex_id","OpenAlex"]
         st.download_button(
             "Download benchmark CSV",
             data=res[csv_cols].to_csv(index=False),
