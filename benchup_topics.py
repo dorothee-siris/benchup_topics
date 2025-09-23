@@ -189,21 +189,36 @@ def sort_fields_df(df_f: pd.DataFrame, mode: str) -> pd.DataFrame:
 
 # static-threshold coloring for topics ratio (%)
 def color_topics_count(val):
-    thresholds = [0, 10, 20, 30]
-    colors = ["#FFFFFF", "#d9bc2b", "#695806", "#332a00"]
-    if pd.isna(val): return "background-color: #FFFFFF; color: black"
+    # New discrete thresholds (percent, 0–5) with interpolation in-between
+    # 0%:#FFFFFF, 1%:#e2e2e2, 2%:#a8a8a8, 3%:#727272, 4%:#404040, 5%:#141414
+    thresholds = [0, 1, 2, 3, 4, 5]
+    colors = ["#FFFFFF", "#e2e2e2", "#a8a8a8", "#727272", "#404040", "#141414"]
+
+    if pd.isna(val):
+        return "background-color: #FFFFFF; color: black"
+
+    # Cap above 5% at the 5% color
     if val >= thresholds[-1]:
-        return "background-color: #332a00; color: white"
-    for i in range(len(thresholds)-1):
-        if thresholds[i] <= val < thresholds[i+1]:
-            ratio = (val - thresholds[i]) / (thresholds[i+1] - thresholds[i])
+        return "background-color: #141414; color: white"
+
+    # Find interval and interpolate color
+    for i in range(len(thresholds) - 1):
+        lo, hi = thresholds[i], thresholds[i + 1]
+        if lo <= val < hi:
+            # linear interpolation between colors[i] and colors[i+1]
             c1 = np.array([int(colors[i][j:j+2], 16) for j in (1, 3, 5)])
-            c2 = np.array([int(colors[i+1][j:j+2], 16) for j in (1, 3, 5)])
-            c = c1 * (1-ratio) + c2 * ratio
-            hex_color = '#%02x%02x%02x' % tuple(c.astype(int))
-            text_color = "white" if val >= 20 else "black"
+            c2 = np.array([int(colors[i + 1][j:j+2], 16) for j in (1, 3, 5)])
+            ratio = (val - lo) / (hi - lo) if hi > lo else 0.0
+            c = (c1 * (1 - ratio) + c2 * ratio).astype(int)
+            hex_color = '#%02x%02x%02x' % tuple(c)
+
+            # Font color: black up to and including 2%, white from 3%+
+            text_color = "black" if val <= 2 else "white"
             return f"background-color: {hex_color}; color: {text_color}"
+
+    # Fallback (shouldn't hit)
     return "background-color: #FFFFFF; color: black"
+
 
 # -------- Load data ----------
 @st.cache_data(show_spinner=True)
@@ -304,14 +319,19 @@ if chosen is not None:
         labels = ["Articles", "Book chapters", "Books"]
         vals2, labels2 = [], []
         for v, l in zip(vals, labels):
-            if v and v>0:
+            if v and v > 0:
                 vals2.append(v); labels2.append(l)
-        if sum(vals2)==0:
-            ax.text(0.5,0.5,"No data", ha="center", va="center")
+
+        if sum(vals2) == 0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center")
         else:
-            ax.pie(vals2, labels=labels2, autopct='%1.0f%%', startangle=90)
+            # no labels on the wedges; legend instead
+            wedges, _ = ax.pie(vals2, startangle=90)
+            ax.legend(wedges, labels2, loc="center left", bbox_to_anchor=(1.05, 0.5), frameon=False)
+
         ax.axis("equal")
         st.pyplot(fig, use_container_width=False)
+
     with c3:
         st.write("**2020–24 totals**")
         st.metric("Articles", f"{arts:,}")
@@ -428,6 +448,7 @@ if chosen is not None:
         min_sim_si = st.slider("Min similarity: Field SI (cosine)", 0.0, 1.0, 0.5, 0.01)
         min_sim_share = st.slider("Min similarity: Field SI % (cosine)", 0.0, 1.0, 0.5, 0.01)
     with cC:
+        st.markdown(f"<div style='color:#d62728; font-weight:700;'>Selected institution: {default_center:,} pubs/yr</div>", unsafe_allow_html=True)
         min_pubs = st.number_input("Min average pubs/year", min_value=100, value=int(min_default), step=25)
         max_pubs = st.number_input("Max average pubs/year", min_value=100, value=int(max_default), step=25)
 
