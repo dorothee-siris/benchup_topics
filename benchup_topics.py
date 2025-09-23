@@ -14,13 +14,15 @@ import re
 from unidecode import unidecode
 import matplotlib.pyplot as plt
 from io import StringIO
+from pathlib import Path
 
 st.set_page_config(page_title="BenchUp topics", layout="wide")
 
 # ------------------
 # Config
 # ------------------
-DATA_PATH = "institutions_master.parquet"  # put this file next to the app or adjust path
+ROOT = Path(__file__).resolve().parent
+DATA_PATH = ROOT / "data" / "institutions_master.parquet"  # <— robust path
 
 # Optional: color by OpenAlex broad domain
 # You can extend this map as needed. Unmatched fields will be grey.
@@ -178,7 +180,7 @@ def build_SI_vector(df_fields, all_keys):
 # ------------------
 @st.cache_data(show_spinner=True)
 def load_master():
-    df = pd.read_parquet(DATA_PATH)
+    df = pd.read_parquet(str(DATA_PATH)) # cast to str for pyarrow
     # Keep minimal types
     needed = [
         "openalex_id", "display_name", "acronyms", "alternatives",
