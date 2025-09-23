@@ -314,30 +314,78 @@ if chosen is not None:
         arts = to_int_safe(chosen.articles_2020_24) or 0
         chaps = to_int_safe(chosen.book_chapters_2020_24) or 0
         books = to_int_safe(chosen.books_2020_24) or 0
-        fig, ax = plt.subplots(figsize=(3.8,3.8))
+        fig, ax = plt.subplots(figsize=(3.8, 3.8))
         vals = [arts, chaps, books]
         labels = ["Articles", "Book chapters", "Books"]
+
+        # keep only nonzero slices
         vals2, labels2 = [], []
         for v, l in zip(vals, labels):
             if v and v > 0:
                 vals2.append(v); labels2.append(l)
-                
-        def _autopct_fmt(pct): return "%1.1f%%" % pct
 
         if sum(vals2) == 0:
             ax.text(0.5, 0.5, "No data", ha="center", va="center")
         else:
-            # place percentages OUTSIDE the pie; no name labels on wedges
-            wedges, _texts, autotexts = ax.pie(
+            wedges, _ = ax.pie(
                 vals2,
                 startangle=90,
-                labels=None,
-                autopct=_autopct_fmt,
-                pctdistance=1.12,          # >1 => outside the circle
-                textprops={"clip_on": False}
+                labels=None,  # we’ll add our own % labels
+                wedgeprops=dict(linewidth=1, edgecolor="white"),
+                normalize=True
             )
-            # Legend BELOW the pie (single row)
-            fig.subplots_adjust(bottom=0.26)  # give extra space for legend
+
+            # --- manual % labels with simple "repel" to avoid overlap ---
+            total = float(sum(vals2))
+            percents = [100.0 * v / total for v in vals2]
+
+            # where to place labels
+            r_out = 1.15   # outside radius for small slices
+            r_in  = 0.70   # inside radius for large slice
+            min_dy = 0.08  # minimal vertical spacing in axes coords for outside labels
+            skip_threshold = 1.0  # hide labels under 1%
+
+            # collect outside labels first (for small slices), then nudge to avoid overlap
+            outside = []
+            inside  = []
+
+            for w, pct in zip(wedges, percents):
+                if pct < skip_threshold:
+                    continue
+                ang = np.deg2rad((w.theta2 + w.theta1) / 2.0)
+                x, y = np.cos(ang), np.sin(ang)
+                if pct >= 10.0:
+                    # large slice: keep label inside the pie
+                    inside.append(dict(x=x*r_in, y=y*r_in, pct=pct))
+                else:
+                    # small slices: label outside with a leader line
+                    outside.append(dict(x=x, y=y, pct=pct))
+
+            # vertically "repel" outside labels
+            outside.sort(key=lambda d: d["y"])
+            for i in range(1, len(outside)):
+                if outside[i]["y"] - outside[i-1]["y"] < min_dy:
+                    outside[i]["y"] = outside[i-1]["y"] + min_dy
+
+            # draw outside labels + leader lines
+            for d in outside:
+                ax.annotate(
+                    f"{d['pct']:.1f}%",
+                    xy=(d["x"], d["y"]),
+                    xytext=(d["x"]*r_out, d["y"]*r_out),
+                    textcoords="data",
+                    ha="center", va="center",
+                    fontsize=10,
+                    arrowprops=dict(arrowstyle="-", lw=0.6),
+                    clip_on=False,
+                )
+
+            # draw inside labels
+            for d in inside:
+                ax.text(d["x"], d["y"], f"{d['pct']:.1f}%", ha="center", va="center", fontsize=10)
+
+            # Legend BELOW the pie
+            fig.subplots_adjust(bottom=0.26)
             ax.legend(
                 wedges, labels2,
                 loc="upper center",
