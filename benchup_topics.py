@@ -18,6 +18,7 @@ from unidecode import unidecode
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from pathlib import Path
+from datetime import datetime
 
 # -------- Page & light mode ----------
 st.set_page_config(page_title="BenchUp topics", layout="wide")
@@ -88,6 +89,16 @@ DOMAIN_COLORS = {
 DOMAIN_FIXED_ORDER = ["Health Sciences", "Life Sciences", "Physical Sciences", "Social Sciences", "Other"]
 
 # -------- Helpers ----------
+
+def slugify_name(name: str) -> str:
+    s = unidecode(str(name))
+    s = re.sub(r"[^A-Za-z0-9]+", "_", s).strip("_")
+    return s
+
+def ts_now() -> str:
+    # day-month-year+hour+minute, e.g. 240920251040
+    return datetime.now().strftime("%d%m%Y%H%M")
+
 def norm(s: str) -> str:
     if pd.isna(s):
         return ""
@@ -253,6 +264,18 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# dataset size for baseline
+N_DATASET = int((df["avg_pubs_per_year"] >= 100).sum())
+
+st.markdown(
+    f"""
+    **Data source & snapshot** — BenchUp topics uses only OpenAlex data (via the API), from a snapshot taken on **September 13, 2025** and now stored locally.  
+    The dataset contains **{N_DATASET:,} institutions worldwide** present in OpenAlex (with a ROR ID) and publishing on average **≥ 100 works per year (2020–2024)** — works include articles (incl. conference communications), chapters, and books ([latest OpenAlex types](https://docs.openalex.org/api-entities/works/work-object#type)).  
+    **Disclaimer:** The data in BenchUp topics should be used as a starting point, not a definitive analysis. While institutions may share similarities based on these indicators, meaningful comparisons require contextual and qualitative assessment. BenchUp helps identify potential international benchmarks but does not provide absolute answers.
+    """,
+    unsafe_allow_html=True,
+)
+
 # -------- Search ----------
 q = st.text_input("Find your institution (name, acronym, alternatives, city)", placeholder="e.g., CNRS Paris, University of Milan, MIT ...")
 
@@ -289,9 +312,13 @@ else:
         idx = int(results.index[[label_for_row(r) for _, r in results.iterrows()].index(sel)])
         chosen = results.loc[idx]
 
-# -------- Profile ----------
 if chosen is not None:
     st.markdown("---")
+
+    # For filenames
+    inst_slug = slugify_name(chosen.display_name)
+
+    # ===== Basic profile =====
     c1, c2, c3 = st.columns([2,1,1])
     with c1:
         st.subheader(chosen.display_name)
@@ -303,22 +330,20 @@ if chosen is not None:
         st.markdown(
             """<div class='note'>
             <strong>Average publications per year (2020–2024)</strong><br/>
-            Publications include articles, book chapters, and books, per the 
-            <a href="https://docs.openalex.org/api-entities/works/work-object#type" target="_blank">
-            latest nomenclature of OpenAlex</a>.
+            Publications include articles, book chapters, and books.
             </div>""",
             unsafe_allow_html=True
         )
 
     with c2:
+        # ---- doc-type pie with non-overlapping labels + legend below ----
         arts = to_int_safe(chosen.articles_2020_24) or 0
         chaps = to_int_safe(chosen.book_chapters_2020_24) or 0
         books = to_int_safe(chosen.books_2020_24) or 0
+
         fig, ax = plt.subplots(figsize=(3.8, 3.8))
         vals = [arts, chaps, books]
         labels = ["Articles", "Book chapters", "Books"]
-
-        # keep only nonzero slices
         vals2, labels2 = [], []
         for v, l in zip(vals, labels):
             if v and v > 0:
@@ -330,68 +355,54 @@ if chosen is not None:
             wedges, _ = ax.pie(
                 vals2,
                 startangle=90,
-                labels=None,  # we’ll add our own % labels
+                labels=None,
                 wedgeprops=dict(linewidth=1, edgecolor="white"),
-                normalize=True
+                normalize=True,
             )
-
-            # --- manual % labels with simple "repel" to avoid overlap ---
             total = float(sum(vals2))
             percents = [100.0 * v / total for v in vals2]
 
-            # where to place labels
-            r_out = 1.15   # outside radius for small slices
-            r_in  = 0.70   # inside radius for large slice
-            min_dy = 0.08  # minimal vertical spacing in axes coords for outside labels
-            skip_threshold = 1.0  # hide labels under 1%
-
-            # collect outside labels first (for small slices), then nudge to avoid overlap
-            outside = []
-            inside  = []
+            # radii for label placement
+            r_far = 1.35   # <1%
+            r_out = 1.15   # 1–10%
+            r_in  = 0.70   # >=10%
 
             for w, pct in zip(wedges, percents):
-                if pct < skip_threshold:
-                    continue
                 ang = np.deg2rad((w.theta2 + w.theta1) / 2.0)
                 x, y = np.cos(ang), np.sin(ang)
-                if pct >= 10.0:
-                    # large slice: keep label inside the pie
-                    inside.append(dict(x=x*r_in, y=y*r_in, pct=pct))
+                if pct < 1.0:
+                    ax.annotate(
+                        f"{pct:.1f}%",
+                        xy=(x, y),
+                        xytext=(x * r_far, y * r_far),
+                        textcoords="data",
+                        ha="center", va="center",
+                        fontsize=10,
+                        arrowprops=dict(arrowstyle="-", lw=0.7),
+                        clip_on=False,
+                    )
+                elif pct < 10.0:
+                    ax.annotate(
+                        f"{pct:.1f}%",
+                        xy=(x, y),
+                        xytext=(x * r_out, y * r_out),
+                        textcoords="data",
+                        ha="center", va="center",
+                        fontsize=10,
+                        arrowprops=dict(arrowstyle="-", lw=0.6),
+                        clip_on=False,
+                    )
                 else:
-                    # small slices: label outside with a leader line
-                    outside.append(dict(x=x, y=y, pct=pct))
+                    ax.text(x * r_in, y * r_in, f"{pct:.1f}%", ha="center", va="center", fontsize=10)
 
-            # vertically "repel" outside labels
-            outside.sort(key=lambda d: d["y"])
-            for i in range(1, len(outside)):
-                if outside[i]["y"] - outside[i-1]["y"] < min_dy:
-                    outside[i]["y"] = outside[i-1]["y"] + min_dy
-
-            # draw outside labels + leader lines
-            for d in outside:
-                ax.annotate(
-                    f"{d['pct']:.1f}%",
-                    xy=(d["x"], d["y"]),
-                    xytext=(d["x"]*r_out, d["y"]*r_out),
-                    textcoords="data",
-                    ha="center", va="center",
-                    fontsize=10,
-                    arrowprops=dict(arrowstyle="-", lw=0.6),
-                    clip_on=False,
-                )
-
-            # draw inside labels
-            for d in inside:
-                ax.text(d["x"], d["y"], f"{d['pct']:.1f}%", ha="center", va="center", fontsize=10)
-
-            # Legend BELOW the pie
+            # Legend below
             fig.subplots_adjust(bottom=0.26)
             ax.legend(
                 wedges, labels2,
                 loc="upper center",
                 bbox_to_anchor=(0.5, -0.10),
                 frameon=False,
-                ncol=3
+                ncol=3,
             )
 
         ax.axis("equal")
@@ -403,13 +414,14 @@ if chosen is not None:
         st.metric("Chapters", f"{chaps:,}")
         st.metric("Books", f"{books:,}")
 
-    # ---- Thematic views
+    # ===== Thematic profile =====
     st.markdown("### Thematic profile")
 
+    # default sort = Fixed domain order
     sort_mode = st.radio(
         "Sort fields by",
         options=["SI (desc)", "Count (desc)", "Fixed domain order"],
-        index=0,
+        index=2,
         horizontal=True
     )
 
@@ -419,6 +431,15 @@ if chosen is not None:
         for d in ["Health Sciences","Life Sciences","Physical Sciences","Social Sciences"]
     )
     st.markdown(f'<div class="legend-row">{legend_items}</div>', unsafe_allow_html=True)
+
+    # SI explanation
+    st.markdown(
+        f"""
+        **What is SI?** The Specialization Index (SI) compares an institution’s thematic weight to the dataset average.  
+        Example: *if an institution has an SI of 2.4 in Immunology, its relative share in that field is 2.4× the average institution in this dataset.*  
+        Baseline: all **{N_DATASET:,} institutions** in this snapshot (world, ≥100 works/year between 2020–24, with ROR ID).
+        """
+    )
 
     df_fields_all = parse_fields_blob(chosen.fields)
     df_fields_prim = parse_fields_blob(chosen.primary_fields)
@@ -437,28 +458,21 @@ if chosen is not None:
             ax.scatter(df_f["si"], y, s=sizes, c=colors, alpha=0.85, edgecolors="none", zorder=3)
             ax.axvline(1.0, color="#444", linestyle="--", linewidth=1, zorder=1)
 
-            # --- Reserve a fixed pixel gutter on the LEFT for the counts ---
-            # 1) decide how many pixels you want to reserve:
-            left_pad_px = 80     # adjust if you want a wider/narrower gutter
-            offset_px   = 6      # a small inset so numbers aren't hugging the edge
-
-            # 2) pick the right limit from data (same as before)
+            # Fixed pixel gutter on the left for counts
+            left_pad_px = 80
+            offset_px   = 6
             xmax = max(1.1, float(df_f["si"].max() or 0) * 1.15)
-
-            # 3) temporarily set limits to compute data-per-pixel, then convert
             ax.set_xlim(0, xmax)
-            fig.canvas.draw()  # must draw to get correct pixel extents
+            fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
             bb = ax.get_window_extent(renderer=renderer)
-            ax_width_px = bb.width                   # axis width in pixels
-            data_per_px = (xmax - 0.0) / ax_width_px # data units per pixel (x direction)
+            ax_width_px = bb.width
+            data_per_px = (xmax - 0.0) / ax_width_px
             left_pad_data = left_pad_px * data_per_px
             offset_data   = offset_px   * data_per_px
-
-            # 4) extend xlim to include the left gutter
             ax.set_xlim(-left_pad_data, xmax)
 
-            # counts text in the left gutter (+1 font size: 9 instead of 8)
+            # counts (font +1)
             for yi, cnt in enumerate(df_f["count"].fillna(0).astype(int)):
                 ax.text(-left_pad_data + offset_data, yi, f"{cnt:,}".replace(",", " "),
                         va="center", ha="left", fontsize=9, color="#444")
@@ -475,7 +489,7 @@ if chosen is not None:
             st.download_button(
                 "Download fields CSV",
                 data=out.to_csv(index=False),
-                file_name=f"fields_{title.replace(' ','_').lower()}_{chosen.openalex_id}.csv",
+                file_name=f"{inst_slug}_{'primary_fields' if 'primary' in title.lower() else 'fields'}_{ts_now()}.csv",
                 mime="text/csv"
             )
 
@@ -483,15 +497,15 @@ if chosen is not None:
     plot_fields(df_fields_all, "Fields (all)", sc1)
     plot_fields(df_fields_prim, "Fields (primary)", sc2)
 
-    # Topics tables (count as int; static-threshold coloring)
+    # Topics tables with your discrete coloring; counts as int
     def show_topics_table(blob, title, host):
         with host:
             st.markdown(f"**{title}**")
             df_topics = parse_topics_blob(blob)
             if df_topics.empty:
                 st.info("No topic data"); return
-            df_topics["ratio_%"] = (df_topics["share"].fillna(0.0) * 100.0)
-            df_topics["count"] = df_topics["count"].fillna(0).astype(int)
+            df_topics["ratio_%"] = (pd.to_numeric(df_topics["share"], errors="coerce").fillna(0.0) * 100.0)
+            df_topics["count"] = pd.to_numeric(df_topics["count"], errors="coerce").fillna(0).astype(int)
             df_topics = df_topics.sort_values(["count","ratio_%"], ascending=False).reset_index(drop=True)
             df_topics.index = df_topics.index + 1
             styled = (
@@ -503,7 +517,7 @@ if chosen is not None:
             st.download_button(
                 "Download topics CSV",
                 data=df_topics.to_csv(index=True),
-                file_name=f"topics_{title.replace(' ','_').lower()}_{chosen.openalex_id}.csv",
+                file_name=f"{inst_slug}_{'top100_primary_topics' if 'primary' in title.lower() else 'top100_topics'}_{ts_now()}.csv",
                 mime="text/csv"
             )
 
@@ -511,11 +525,10 @@ if chosen is not None:
     show_topics_table(chosen.topics_top100, "Topics (all, top 100)", t1)
     show_topics_table(chosen.primary_topics_top100, "Topics (primary, top 100)", t2)
 
-    # -------- Benchmarking --------
+    # ===== Benchmarking =====
     st.markdown("---")
     st.header("Benchmarking")
 
-    # Defaults: ±300 rounded, min shared topics 15
     default_center = int(round(max(100.0, chosen.avg_pubs_per_year)))
     min_default = int(round(max(100.0, default_center - 300)))
     max_default = int(round(default_center + 300))
@@ -529,20 +542,20 @@ if chosen is not None:
         )
         use_primary = primary_mode.startswith("Primary")
     with cB:
-        min_shared_topics = st.slider("Minimum shared topics (top 100)", 1, 50, 15)
-        min_sim_si = st.slider("Min similarity: Field SI (cosine)", 0.0, 1.0, 0.5, 0.01)
-        min_sim_share = st.slider("Min similarity: Field SI % (cosine)", 0.0, 1.0, 0.5, 0.01)
+        min_shared_topics = st.slider("Minimum shared topics among the top 100*", 1, 50, 15)
+        # ORDER: % first, then SI
+        min_sim_share = st.slider("Similarity Index (Fields % proximity)**", 0.0, 1.0, 0.5, 0.01)
+        min_sim_si    = st.slider("Similarity Index (Fields SI proximity)***", 0.0, 1.0, 0.5, 0.01)
     with cC:
-        st.markdown(f"<div style='color:#d62728; font-weight:700;'>Selected institution: {default_center:,} pubs/yr</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='color:#d62728; font-weight:700;'>Selected avg: {default_center:,} pubs/yr</div>", unsafe_allow_html=True)
         min_pubs = st.number_input("Min average pubs/year", min_value=100, value=int(min_default), step=25)
         max_pubs = st.number_input("Max average pubs/year", min_value=100, value=int(max_default), step=25)
 
     allowed_types = sorted([t for t in df["type"].dropna().unique()])
     type_filter = st.multiselect("Institution type (optional)", allowed_types, default=[])
 
-    # Extra geo filters
+    # Geo filters
     exclude_same_country = st.checkbox("Exclude institutions from the same country", value=False)
-
     EUROPE = {
         "Albania","Andorra","Armenia","Austria","Azerbaijan","Belarus","Belgium","Bosnia and Herzegovina",
         "Bulgaria","Croatia","Cyprus","Czechia","Denmark","Estonia","Finland","France","Georgia","Germany",
@@ -553,10 +566,15 @@ if chosen is not None:
     }
     restrict_europe = st.checkbox("Restrict results to Europe", value=False)
 
-    # Prepare target topic set & vectors
+    st.caption(
+        "*Shared topics are counted among the top-100 topics lists of both institutions."
+        "**Fields % proximity uses cosine similarity (on relative shares across fields."
+        "***Fields SI proximity uses cosine similarity on SI across fields."
+    )
+
+    # Target sets & vectors
     target_topics_df = parse_topics_blob(chosen.primary_topics_top100 if use_primary else chosen.topics_top100)
     target_topics_set = set(target_topics_df["name"].tolist())
-
     target_fields_df = parse_fields_blob(chosen.primary_fields if use_primary else chosen.fields)
 
     @st.cache_data(show_spinner=False)
@@ -569,8 +587,8 @@ if chosen is not None:
 
     field_col = "primary_fields" if use_primary else "fields"
     ALL_KEYS = global_field_keys(df, field_col)
-    target_vec_si = build_vector(target_fields_df, ALL_KEYS, kind="si")
     target_vec_share = build_vector(target_fields_df, ALL_KEYS, kind="share")
+    target_vec_si    = build_vector(target_fields_df, ALL_KEYS, kind="si")
 
     def row_passes_basic_filters(r):
         apy = r["avg_pubs_per_year"]
@@ -595,36 +613,33 @@ if chosen is not None:
 
         # field vectors
         df_fields_r = parse_fields_blob(r.primary_fields if use_primary else r.fields)
-        vec_si_r = build_vector(df_fields_r, ALL_KEYS, kind="si")
         vec_share_r = build_vector(df_fields_r, ALL_KEYS, kind="share")
+        vec_si_r    = build_vector(df_fields_r, ALL_KEYS, kind="si")
 
-        sim_si = cosine_sim(target_vec_si, vec_si_r)
         sim_share = cosine_sim(target_vec_share, vec_share_r)
-        if sim_si < min_sim_si or sim_share < min_sim_share:
+        sim_si    = cosine_sim(target_vec_si, vec_si_r)
+        if sim_share < min_sim_share or sim_si < min_sim_si:
             continue
 
-        # --- TOPICS DETAIL (coerce to numeric to avoid int() on NaN) ---
+        # TOPICS DETAIL (robust to NaNs)
         df_topics_r = df_topics_r.copy()
         df_topics_r["count"] = pd.to_numeric(df_topics_r["count"], errors="coerce").fillna(0).astype(int)
         df_topics_r["ratio_%"] = pd.to_numeric(df_topics_r["share"], errors="coerce").fillna(0.0) * 100.0
-
         shared_df = df_topics_r[df_topics_r["name"].isin(shared_names)].copy()
-        shared_df = shared_df.sort_values(["count", "ratio_%"], ascending=False)
-
+        shared_df = shared_df.sort_values(["count","ratio_%"], ascending=False)
         shared_detail = "; ".join(
             f"{n} ({int(c)}; {float(r_):0.2f}%)"
-            for n, c, r_ in shared_df[["name", "count", "ratio_%"]].itertuples(index=False, name=None)
+            for n, c, r_ in shared_df[["name","count","ratio_%"]].itertuples(index=False, name=None)
         )
 
-        # --- FIELDS DETAIL (coerce to numeric for safety) ---
+        # FIELDS DETAIL (robust)
         fd = df_fields_r.copy()
         fd["count"] = pd.to_numeric(fd["count"], errors="coerce").fillna(0).astype(int)
         fd["ratio_%"] = pd.to_numeric(fd["share"], errors="coerce").fillna(0.0) * 100.0
         fd["si"] = pd.to_numeric(fd["si"], errors="coerce").fillna(0.0)
-
         fields_detail = "; ".join(
             f"{n} ({int(c)}; {ratio:0.2f}% ; SI {si:0.2f})"
-            for n, c, ratio, si in fd[["name", "count", "ratio_%", "si"]].itertuples(index=False, name=None)
+            for n, c, ratio, si in fd[["name","count","ratio_%","si"]].itertuples(index=False, name=None)
         )
 
         arts_r = to_int_safe(r.articles_2020_24) or 0
@@ -640,8 +655,9 @@ if chosen is not None:
             "country": r.country,
             "avg_pubs_per_year": int(round(r.avg_pubs_per_year)),
             "shared_topics_count": len(shared_names),
-            "similarity_SI": round(sim_si, 3),
+            # ORDER: % first, then SI
             "similarity_%": round(sim_share, 3),
+            "similarity_SI": round(sim_si, 3),
             "shared_topics_detail": shared_detail,
             "fields_detail": fields_detail,
             "document_types": docs_detail,
@@ -652,21 +668,19 @@ if chosen is not None:
     if res.empty:
         st.info("No matches with the current filters.")
     else:
-        # Rank primarily by shared topics (desc), then by similarity metrics
+        # Rank: shared topics desc, then similarity_% then similarity_SI
         res = res.sort_values(
-            ["shared_topics_count","similarity_SI","similarity_%","avg_pubs_per_year"],
+            ["shared_topics_count","similarity_%","similarity_SI","avg_pubs_per_year"],
             ascending=[False, False, False, True]
         ).reset_index(drop=True)
 
         show_details = st.checkbox("Show detailed columns (shared topics, fields, doc types)", value=False)
 
-        base_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_SI","similarity_%","OpenAlex"]
+        base_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI","OpenAlex"]
         detail_cols = ["shared_topics_detail","fields_detail","document_types"]
         display_cols = (base_cols + detail_cols) if show_details else base_cols
 
         st.write(f"**{len(res)}** matching institutions")
-
-        # Keep sortable interactive table; provide link in a dedicated column
         st.dataframe(
             res[display_cols],
             use_container_width=True,
@@ -674,15 +688,17 @@ if chosen is not None:
                 "OpenAlex": st.column_config.LinkColumn("OpenAlex", help="Open institution on OpenAlex"),
                 "avg_pubs_per_year": st.column_config.NumberColumn("Avg pubs/yr", format="%d"),
                 "shared_topics_count": st.column_config.NumberColumn("Shared topics", format="%d"),
+                "similarity_%": st.column_config.NumberColumn("Similarity (Fields %)", format="%.3f"),
+                "similarity_SI": st.column_config.NumberColumn("Similarity (Fields SI)", format="%.3f"),
             },
             hide_index=True,
         )
 
-        # CSV includes everything, including openalex_id
-        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_SI","similarity_%"] + detail_cols + ["openalex_id","OpenAlex"]
+        exercise = f"{len(res)}_benchmarks"
+        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI"] + detail_cols + ["openalex_id","OpenAlex"]
         st.download_button(
             "Download benchmark CSV",
             data=res[csv_cols].to_csv(index=False),
-            file_name=f"benchmarks_{chosen.openalex_id}.csv",
+            file_name=f"{inst_slug}_{exercise}_{ts_now()}.csv",
             mime="text/csv"
         )
