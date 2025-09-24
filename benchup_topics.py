@@ -603,21 +603,28 @@ if chosen is not None:
         if sim_si < min_sim_si or sim_share < min_sim_share:
             continue
 
-        # details
-        if not df_topics_r.empty:
-            df_topics_r["ratio_%"] = (df_topics_r["share"].fillna(0.0) * 100.0)
+        # --- TOPICS DETAIL (coerce to numeric to avoid int() on NaN) ---
+        df_topics_r = df_topics_r.copy()
+        df_topics_r["count"] = pd.to_numeric(df_topics_r["count"], errors="coerce").fillna(0).astype(int)
+        df_topics_r["ratio_%"] = pd.to_numeric(df_topics_r["share"], errors="coerce").fillna(0.0) * 100.0
+
         shared_df = df_topics_r[df_topics_r["name"].isin(shared_names)].copy()
-        shared_df = shared_df.sort_values(["count","ratio_%"], ascending=False)
+        shared_df = shared_df.sort_values(["count", "ratio_%"], ascending=False)
+
         shared_detail = "; ".join(
-            f"{n} ({int(c)}; {r_:0.2f}%)"
-            for n, c, r_ in shared_df[["name","count","ratio_%"]].itertuples(index=False, name=None)
+            f"{n} ({int(c)}; {float(r_):0.2f}%)"
+            for n, c, r_ in shared_df[["name", "count", "ratio_%"]].itertuples(index=False, name=None)
         )
 
+        # --- FIELDS DETAIL (coerce to numeric for safety) ---
         fd = df_fields_r.copy()
-        fd["ratio_%"] = fd["share"].fillna(0.0) * 100.0
+        fd["count"] = pd.to_numeric(fd["count"], errors="coerce").fillna(0).astype(int)
+        fd["ratio_%"] = pd.to_numeric(fd["share"], errors="coerce").fillna(0.0) * 100.0
+        fd["si"] = pd.to_numeric(fd["si"], errors="coerce").fillna(0.0)
+
         fields_detail = "; ".join(
             f"{n} ({int(c)}; {ratio:0.2f}% ; SI {si:0.2f})"
-            for n, c, ratio, si in fd[["name","count","ratio_%","si"]].itertuples(index=False, name=None)
+            for n, c, ratio, si in fd[["name", "count", "ratio_%", "si"]].itertuples(index=False, name=None)
         )
 
         arts_r = to_int_safe(r.articles_2020_24) or 0
