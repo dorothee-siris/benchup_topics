@@ -488,7 +488,7 @@ if chosen is not None:
             out = df_f[["name","count","share","si"]].copy()
             st.download_button(
                 "Download fields CSV",
-                data=out.to_csv(index=False),
+                data=out.to_csv(index=False,encoding='utf-8-sig'),
                 file_name=f"{inst_slug}_{'primary_fields' if 'primary' in title.lower() else 'fields'}_{ts_now()}.csv",
                 mime="text/csv"
             )
@@ -516,7 +516,7 @@ if chosen is not None:
             st.dataframe(styled, use_container_width=True)
             st.download_button(
                 "Download topics CSV",
-                data=df_topics.to_csv(index=True),
+                data=df_topics.to_csv(index=True,encoding='utf-8-sig'),
                 file_name=f"{inst_slug}_{'top100_primary_topics' if 'primary' in title.lower() else 'top100_topics'}_{ts_now()}.csv",
                 mime="text/csv"
             )
@@ -698,7 +698,7 @@ if chosen is not None:
         csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI"] + detail_cols + ["openalex_id","OpenAlex"]
         st.download_button(
             "Download benchmark CSV",
-            data=res[csv_cols].to_csv(index=False),
+            data=res[csv_cols].to_csv(index=False,encoding='utf-8-sig'),
             file_name=f"{inst_slug}_{exercise}_{ts_now()}.csv",
             mime="text/csv"
         )
