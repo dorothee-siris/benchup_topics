@@ -443,6 +443,68 @@ if chosen is not None:
     df_fields_all = parse_fields_blob(chosen.fields)
     df_fields_prim = parse_fields_blob(chosen.primary_fields)
 
+    def plot_fields_share(df_f, title, host):
+        with host:
+            st.markdown(f"**{title}**")
+            if df_f.empty:
+                st.info("No field data"); return
+
+            # Same sorting logic as SI plots
+            df_f = sort_fields_df(df_f, sort_mode)
+
+            # Prepare data
+            df_f = df_f.copy()
+            df_f["ratio_%"] = pd.to_numeric(df_f["share"], errors="coerce").fillna(0.0) * 100.0
+            df_f["count"] = pd.to_numeric(df_f["count"], errors="coerce").fillna(0).astype(int)
+
+            y = np.arange(len(df_f))
+            colors = [domain_color(n) for n in df_f["name"]]
+
+            fig, ax = plt.subplots(figsize=(6.8, 0.48*len(df_f)+1))
+            ax.barh(y, df_f["ratio_%"], color=colors, alpha=0.85, zorder=3)
+
+            # Fixed pixel gutter on the left for counts (same as SI plots)
+            left_pad_px = 80
+            offset_px   = 6
+            xmax = max(1.0, float(df_f["ratio_%"].max() or 0) * 1.15)
+            ax.set_xlim(0, xmax)
+
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            bb = ax.get_window_extent(renderer=renderer)
+            ax_width_px = bb.width
+            data_per_px = (xmax - 0.0) / ax_width_px
+            left_pad_data = left_pad_px * data_per_px
+            offset_data   = offset_px   * data_per_px
+
+            # Extend x-range to include left gutter space
+            ax.set_xlim(-left_pad_data, xmax)
+
+            # counts (font +1), same placement logic as SI
+            for yi, cnt in enumerate(df_f["count"]):
+                ax.text(
+                    -left_pad_data + offset_data, yi,
+                    f"{cnt:,}".replace(",", " "),
+                    va="center", ha="left", fontsize=9, color="#444"
+                )
+
+            ax.set_xlabel("Share (%)")
+            ax.set_yticks(y)
+            ax.set_yticklabels(df_f["name"])
+            ax.invert_yaxis()
+            ax.grid(axis="x", color="#eee"); ax.set_axisbelow(True)
+
+            st.pyplot(fig, use_container_width=True)
+
+            # Optional CSV export for % view
+            out = df_f[["name","count","share","ratio_%"]].copy()
+            st.download_button(
+                "Download fields % CSV",
+                data=out.to_csv(index=False, encoding='utf-8-sig'),
+                file_name=f"{inst_slug}_{'primary_fields_share' if 'primary' in title.lower() else 'fields_share'}_{ts_now()}.csv",
+                mime="text/csv"
+            )
+
     def plot_fields(df_f, title, host):
         with host:
             st.markdown(f"**{title}**")
@@ -492,9 +554,14 @@ if chosen is not None:
                 mime="text/csv"
             )
 
+    # --- NEW: share (%) plots before SI plots ---
+    sp1, sp2 = st.columns(2)
+    plot_fields_share(df_fields_all,  "Fields % (all)",     sp1)
+    plot_fields_share(df_fields_prim, "Fields % (primary)", sp2)
+
     sc1, sc2 = st.columns(2)
-    plot_fields(df_fields_all, "Fields (all)", sc1)
-    plot_fields(df_fields_prim, "Fields (primary)", sc2)
+    plot_fields(df_fields_all, "Fields SI (all)", sc1)
+    plot_fields(df_fields_prim, "Fields SI (primary)", sc2)
 
     # Topics tables with your discrete coloring; counts as int
     def show_topics_table(blob, title, host):
