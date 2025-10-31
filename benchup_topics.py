@@ -230,7 +230,6 @@ def color_topics_count(val):
     # Fallback (shouldn't hit)
     return "background-color: #FFFFFF; color: black"
 
-
 # -------- Load data ----------
 @st.cache_data(show_spinner=True)
 def load_master():
@@ -598,6 +597,21 @@ if chosen is not None:
         if restrict_europe and (r.get("country") not in EUROPE): return False
         return True
 
+    # --- Filtered OpenAlex works URLs (2020–2024; articles/chapters/books) ---
+    TYPES_Q = "type:types/article|types/book-chapter|types/book"
+    YEARS_Q = "publication_year:2020-2024"
+
+    def oa_works_url(inst_id):
+        iid = str(inst_id).lower()
+        return f"https://openalex.org/works?page=1&filter=authorships.institutions.lineage:{iid},{TYPES_Q},{YEARS_Q}"
+
+    def oa_copubs_url(a_id, b_id):
+        a = str(a_id).lower()
+        b = str(b_id).lower()
+        return f"https://openalex.org/works?page=1&filter=authorships.institutions.lineage:{a},{TYPES_Q},{YEARS_Q},authorships.institutions.lineage:{b}"
+
+    chosen_id = str(chosen.openalex_id).lower()
+
     rows = []
     for _, r in df.iterrows():
         if r.openalex_id == chosen.openalex_id:
@@ -649,7 +663,8 @@ if chosen is not None:
 
         rows.append({
             "name": r.display_name,
-            "OpenAlex": f"https://openalex.org/institutions/{str(r.openalex_id).lower()}",
+            "OpenAlex": oa_works_url(r.openalex_id),             # filtered works for that institution
+            "Copubs": oa_copubs_url(chosen_id, r.openalex_id),   # intersection with the chosen institution
             "type": r.type,
             "city": r.city,
             "country": r.country,
@@ -676,7 +691,7 @@ if chosen is not None:
 
         show_details = st.checkbox("Show detailed columns (shared topics, fields, doc types)", value=False)
 
-        base_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI","OpenAlex"]
+        base_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI","Copubs","OpenAlex"]
         detail_cols = ["shared_topics_detail","fields_detail","document_types"]
         display_cols = (base_cols + detail_cols) if show_details else base_cols
 
@@ -685,7 +700,14 @@ if chosen is not None:
             res[display_cols],
             use_container_width=True,
             column_config={
-                "OpenAlex": st.column_config.LinkColumn("OpenAlex", help="Open institution on OpenAlex"),
+                "Copubs": st.column_config.LinkColumn(
+                    "Copubs",
+                    help=f"Co-publications with {chosen.display_name} (2020–24; articles/chapters/books)"
+                ),
+                "OpenAlex": st.column_config.LinkColumn(
+                    "OpenAlex",
+                    help="Filtered works for this institution (2020–24; articles/chapters/books)"
+                ),
                 "avg_pubs_per_year": st.column_config.NumberColumn("Avg pubs/yr", format="%d"),
                 "shared_topics_count": st.column_config.NumberColumn("Shared topics", format="%d"),
                 "similarity_%": st.column_config.NumberColumn("Similarity (Fields %)", format="%.3f"),
@@ -695,7 +717,8 @@ if chosen is not None:
         )
 
         exercise = f"{len(res)}_benchmarks"
-        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI"] + detail_cols + ["openalex_id","OpenAlex"]
+        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI"] \
+           + detail_cols + ["openalex_id","Copubs","OpenAlex"]
         st.download_button(
             "Download benchmark CSV",
             data=res[csv_cols].to_csv(index=False,encoding='utf-8-sig'),
