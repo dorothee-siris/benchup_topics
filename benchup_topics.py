@@ -275,6 +275,13 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# --- Global toggle to drive all visuals & benchmarking ---
+use_primary = st.toggle(
+    "Use primary fields & topics",
+    value=False,
+    help="When ON, all visuals, topics, and benchmarking use PRIMARY fields/topics only."
+)
+
 # -------- Search ----------
 q = st.text_input("Find your institution (name, acronym, alternatives, city)", placeholder="e.g., CNRS Paris, University of Milan, MIT ...")
 
@@ -412,13 +419,6 @@ if chosen is not None:
         st.metric("Articles", f"{arts:,}")
         st.metric("Chapters", f"{chaps:,}")
         st.metric("Books", f"{books:,}")
-
-    # --- Global toggle to drive all visuals & benchmarking ---
-    use_primary = st.toggle(
-        "Use primary fields & topics",
-        value=False,
-        help="When ON, all visuals, topics, and benchmarking use PRIMARY fields/topics only."
-    )
 
     # ===== Thematic profile =====
     st.markdown("### Thematic profile")
@@ -613,10 +613,14 @@ if chosen is not None:
         min_pubs = st.number_input("Min average pubs/year", min_value=100, value=int(min_default), step=25)
         max_pubs = st.number_input("Max average pubs/year", min_value=100, value=int(max_default), step=25)
 
-    st.caption(
+    st.markdown(
+        f"""
         "*Shared topics are counted among the top-100 topics lists of both institutions."
         "**Fields % proximity uses cosine similarity (on relative shares across fields."
+        """
     )
+
+    st.subheader("Additional filters")
 
     allowed_types = sorted([t for t in df["type"].dropna().unique()])
     type_filter = st.multiselect("Institution type (optional)", allowed_types, default=[])
