@@ -413,6 +413,13 @@ if chosen is not None:
         st.metric("Chapters", f"{chaps:,}")
         st.metric("Books", f"{books:,}")
 
+    # --- Global toggle to drive all visuals & benchmarking ---
+    use_primary = st.toggle(
+        "Use primary fields & topics",
+        value=False,
+        help="When ON, all visuals, topics, and benchmarking use PRIMARY fields/topics only."
+    )
+
     # ===== Thematic profile =====
     st.markdown("### Thematic profile")
 
@@ -440,8 +447,8 @@ if chosen is not None:
         """
     )
 
-    df_fields_all = parse_fields_blob(chosen.fields)
-    df_fields_prim = parse_fields_blob(chosen.primary_fields)
+    df_fields_sel   = parse_fields_blob(chosen.primary_fields if use_primary else chosen.fields)
+    topics_blob_sel = chosen.primary_topics_top100 if use_primary else chosen.topics_top100
 
     def plot_fields_share(df_f, title, host):
         with host:
@@ -554,14 +561,10 @@ if chosen is not None:
                 mime="text/csv"
             )
 
-    # --- NEW: share (%) plots before SI plots ---
-    sp1, sp2 = st.columns(2)
-    plot_fields_share(df_fields_all,  "Fields % (all)",     sp1)
-    plot_fields_share(df_fields_prim, "Fields % (primary)", sp2)
-
-    sc1, sc2 = st.columns(2)
-    plot_fields(df_fields_all, "Fields SI (all)", sc1)
-    plot_fields(df_fields_prim, "Fields SI (primary)", sc2)
+    # --- NEW: One pair only: left = % share, right = SI (driven by the toggle)
+    cp1, cp2 = st.columns(2)
+    plot_fields_share(df_fields_sel, f"Fields (%) ({'primary' if use_primary else 'all'})", cp1)
+    plot_fields(df_fields_sel,       f"Fields (SI) ({'primary' if use_primary else 'all'})", cp2)
 
     # Topics tables with your discrete coloring; counts as int
     def show_topics_table(blob, title, host):
@@ -587,9 +590,11 @@ if chosen is not None:
                 mime="text/csv"
             )
 
-    t1, t2 = st.columns(2)
-    show_topics_table(chosen.topics_top100, "Topics (all, top 100)", t1)
-    show_topics_table(chosen.primary_topics_top100, "Topics (primary, top 100)", t2)
+    show_topics_table(
+        topics_blob_sel,
+        f"Topics ({'primary' if use_primary else 'all'}, top 100)",
+        st.container()
+    )
 
     # ===== Benchmarking =====
     st.markdown("---")
@@ -599,20 +604,12 @@ if chosen is not None:
     min_default = int(round(max(100.0, default_center - 300)))
     max_default = int(round(default_center + 300))
 
-    cA, cB, cC = st.columns(3)
+    cA, cB = st.columns(2)
     with cA:
-        primary_mode = st.radio(
-            "Benchmark using…",
-            options=["All topics & fields", "Primary topics & fields"],
-            index=0
-        )
-        use_primary = primary_mode.startswith("Primary")
-    with cB:
         min_shared_topics = st.slider("Minimum shared topics among the top 100*", 1, 50, 15)
-        # ORDER: % first, then SI
         min_sim_share = st.slider("Similarity Index (Fields % proximity)**", 0.0, 1.0, 0.5, 0.01)
         min_sim_si    = st.slider("Similarity Index (Fields SI proximity)***", 0.0, 1.0, 0.5, 0.01)
-    with cC:
+    with cB:
         st.markdown(f"<div style='color:#d62728; font-weight:700;'>Selected avg: {default_center:,} pubs/yr</div>", unsafe_allow_html=True)
         min_pubs = st.number_input("Min average pubs/year", min_value=100, value=int(min_default), step=25)
         max_pubs = st.number_input("Max average pubs/year", min_value=100, value=int(max_default), step=25)
