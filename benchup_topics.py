@@ -607,12 +607,16 @@ if chosen is not None:
     cA, cB = st.columns(2)
     with cA:
         min_shared_topics = st.slider("Minimum shared topics among the top 100*", 1, 50, 15)
-        min_sim_share = st.slider("Similarity Index (Fields % proximity)**", 0.0, 1.0, 0.5, 0.01)
-        min_sim_si    = st.slider("Similarity Index (Fields SI proximity)***", 0.0, 1.0, 0.5, 0.01)
+        min_sim_share = st.slider("Similarity (Fields % proximity)**", 0.0, 1.0, 0.90, 0.01)
     with cB:
         st.markdown(f"<div style='color:#d62728; font-weight:700;'>Selected avg: {default_center:,} pubs/yr</div>", unsafe_allow_html=True)
         min_pubs = st.number_input("Min average pubs/year", min_value=100, value=int(min_default), step=25)
         max_pubs = st.number_input("Max average pubs/year", min_value=100, value=int(max_default), step=25)
+
+    st.caption(
+        "*Shared topics are counted among the top-100 topics lists of both institutions."
+        "**Fields % proximity uses cosine similarity (on relative shares across fields."
+    )
 
     allowed_types = sorted([t for t in df["type"].dropna().unique()])
     type_filter = st.multiselect("Institution type (optional)", allowed_types, default=[])
@@ -628,12 +632,6 @@ if chosen is not None:
         "Turkey","Ukraine","United Kingdom","Faroe Islands"
     }
     restrict_europe = st.checkbox("Restrict results to Europe", value=False)
-
-    st.caption(
-        "*Shared topics are counted among the top-100 topics lists of both institutions."
-        "**Fields % proximity uses cosine similarity (on relative shares across fields."
-        "***Fields SI proximity uses cosine similarity on SI across fields."
-    )
 
     # Target sets & vectors
     target_topics_df = parse_topics_blob(chosen.primary_topics_top100 if use_primary else chosen.topics_top100)
@@ -692,11 +690,9 @@ if chosen is not None:
         # field vectors
         df_fields_r = parse_fields_blob(r.primary_fields if use_primary else r.fields)
         vec_share_r = build_vector(df_fields_r, ALL_KEYS, kind="share")
-        vec_si_r    = build_vector(df_fields_r, ALL_KEYS, kind="si")
 
         sim_share = cosine_sim(target_vec_share, vec_share_r)
-        sim_si    = cosine_sim(target_vec_si, vec_si_r)
-        if sim_share < min_sim_share or sim_si < min_sim_si:
+        if sim_share < min_sim_share:
             continue
 
         # TOPICS DETAIL (robust to NaNs)
@@ -736,7 +732,6 @@ if chosen is not None:
             "shared_topics_count": len(shared_names),
             # ORDER: % first, then SI
             "similarity_%": round(sim_share, 3),
-            "similarity_SI": round(sim_si, 3),
             "shared_topics_detail": shared_detail,
             "fields_detail": fields_detail,
             "document_types": docs_detail,
@@ -747,15 +742,15 @@ if chosen is not None:
     if res.empty:
         st.info("No matches with the current filters.")
     else:
-        # Rank: shared topics desc, then similarity_% then similarity_SI
+        # Rank: shared topics desc, then similarity_%
         res = res.sort_values(
-            ["shared_topics_count","similarity_%","similarity_SI","avg_pubs_per_year"],
-            ascending=[False, False, False, True]
+            ["shared_topics_count","similarity_%","avg_pubs_per_year"],
+            ascending=[False, False, True]
         ).reset_index(drop=True)
 
         show_details = st.checkbox("Show detailed columns (shared topics, fields, doc types)", value=False)
 
-        base_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI","Copubs","OpenAlex"]
+        base_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","Copubs","OpenAlex"]
         detail_cols = ["shared_topics_detail","fields_detail","document_types"]
         display_cols = (base_cols + detail_cols) if show_details else base_cols
 
@@ -775,13 +770,12 @@ if chosen is not None:
                 "avg_pubs_per_year": st.column_config.NumberColumn("Avg pubs/yr", format="%d"),
                 "shared_topics_count": st.column_config.NumberColumn("Shared topics", format="%d"),
                 "similarity_%": st.column_config.NumberColumn("Similarity (Fields %)", format="%.3f"),
-                "similarity_SI": st.column_config.NumberColumn("Similarity (Fields SI)", format="%.3f"),
             },
             hide_index=True,
         )
 
         exercise = f"{len(res)}_benchmarks"
-        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%","similarity_SI"] \
+        csv_cols = ["name","type","city","country","avg_pubs_per_year","shared_topics_count","similarity_%"] \
            + detail_cols + ["openalex_id","Copubs","OpenAlex"]
         st.download_button(
             "Download benchmark CSV",
