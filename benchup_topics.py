@@ -615,8 +615,8 @@ if chosen is not None:
 
     st.markdown(
         f"""
-        "*Shared topics are counted among the top-100 topics lists of both institutions."
-        "**Fields % proximity uses cosine similarity (on relative shares across fields."
+        *Shared topics are counted among the top-100 topics lists of both institutions.\
+        **Fields % proximity uses cosine similarity (on relative shares across fields.
         """
     )
 
